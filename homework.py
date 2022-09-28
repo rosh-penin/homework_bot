@@ -1,7 +1,7 @@
 import logging
 import os
-
 import time
+
 from dotenv import load_dotenv
 import requests
 import telegram
@@ -119,8 +119,7 @@ def main():
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     while True:
         try:
-            current_timestamp = 0
-            # current_timestamp = int(time.time())
+            current_timestamp = int(time.time())
             logger.debug(f'new iteration on {current_timestamp}')
             response = check_response(get_api_answer(current_timestamp))
         except Exception as error:
