@@ -6,9 +6,7 @@ from dotenv import load_dotenv
 import requests
 import telegram
 
-
 load_dotenv()
-
 
 PRACTICUM_TOKEN = os.getenv('YA_P_TOKEN')
 TELEGRAM_TOKEN = os.getenv('TG_TOKEN')
@@ -18,7 +16,7 @@ RETRY_TIME = 600
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
-HOMEWORK_STATUSES = {
+HOMEWORK_VERDICTS = {
     'approved': 'Работа проверена: ревьюеру всё понравилось. Ура!',
     'reviewing': 'Работа взята на проверку ревьюером.',
     'rejected': 'Работа проверена: у ревьюера есть замечания.'
@@ -33,6 +31,14 @@ logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 
 cache = {}
+errors = []
+
+
+def send_errors_but_not_spam(bot, message):
+    if message not in errors:
+        # Now each error should be sent only once.
+        errors.append(message)
+        bot.send_message(TELEGRAM_CHAT_ID, message)
 
 
 def send_message(bot, message):
@@ -40,41 +46,38 @@ def send_message(bot, message):
     try:
         bot.send_message(TELEGRAM_CHAT_ID, message)
         logger.info(f'sent message:\n{message}')
-    except Exception as error:
+    except telegram.error.TelegramError as error:
         logger.error(f'error when sending message:\n{error}')
+        raise Exception('send message error')
 
 
 def get_api_answer(current_timestamp):
     """Get JSON from API and return it as a python dict."""
-    timestamp = current_timestamp
-    params = {'from_date': timestamp}
+    params = {'from_date': current_timestamp}
     try:
         response = requests.get(ENDPOINT, params, headers=HEADERS)
     except Exception as error:
         logger.error(f'error getting ENDPOINT:\n{error}')
+        raise Exception('get_api func broke')
 
     if response.status_code != 200:
         raise Exception(
             f'response status code not 200 but {response.status_code}'
         )
-
     return response.json()
 
 
 def check_response(response):
     """If JSON correct returns list of homeworks."""
-    # Pytest insist on commenting next two blokes of code.
-    # But i think they are necessary. Correct me.
-
-    # if type(response) is not dict:
-    #     logger.error('response is not dict')
-    #     raise Exception('response is not dict')
-    # if 'homeworks' not in response:
-    #     logger.error('homework not in response')
-    #     raise Exception('homework not in response')
-    if type(response['homeworks']) is not list:
+    if not isinstance(response, dict):
+        logger.error('response is not dict')
+        raise TypeError('response is not dict')
+    if 'homeworks' not in response:
+        logger.error('homework not in response')
+        raise Exception('homework not in response')
+    if not isinstance(response['homeworks'], list):
         logger.error('homework is not list')
-        raise Exception('homework is not list')
+        raise TypeError('homework is not list')
 
     return response.get('homeworks')
 
@@ -89,9 +92,9 @@ def parse_status(homework):
             raise KeyError('There is no correct keys in homework')
     homework_name = homework.get('homework_name')
     homework_status = homework.get('status')
-    if homework_status not in HOMEWORK_STATUSES:
+    if homework_status not in HOMEWORK_VERDICTS:
         raise Exception('status is different')
-    verdict = HOMEWORK_STATUSES.get(homework_status)
+    verdict = HOMEWORK_VERDICTS.get(homework_status)
 
     if homework_name not in cache:
         logger.info('adding new homework to cache')
@@ -106,8 +109,10 @@ def parse_status(homework):
 
 def check_tokens():
     """Check that tokens exists. If not - stop programm."""
-    if None in (PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID):
+    if not all((PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)):
         logger.critical('TOKEN NOT FOUND. ALARM.')
+        # Wanted to just raise error and stop programm there.
+        # But pytest think differently.
         return False
 
     return True
@@ -115,23 +120,25 @@ def check_tokens():
 
 def main():
     """Основная логика работы бота."""
-    check_tokens()
+    loop = check_tokens() # Should i just put it in loop conditions?
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
-    while True:
+    current_timestamp = int(time.time())
+    while loop is True:
         try:
-            current_timestamp = int(time.time())
             logger.debug(f'new iteration on {current_timestamp}')
-            response = check_response(get_api_answer(current_timestamp))
+            response_from_api = get_api_answer(current_timestamp)
+            current_timestamp = response_from_api.get('current_date')
+            response = check_response(response_from_api)
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             logger.error(f'error in main():\n{current_timestamp}\n{error}')
-            send_message(bot, message)
-            time.sleep(RETRY_TIME)
+            send_errors_but_not_spam(bot, message)
         else:
             for homework in response:
                 message = parse_status(homework)
                 if message is not None:
                     send_message(bot, message)
+        finally:
             time.sleep(RETRY_TIME)
 
 
