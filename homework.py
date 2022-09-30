@@ -35,6 +35,7 @@ errors = []
 
 
 def send_errors_but_not_spam(bot, message):
+    """Put errors in list. First time error occurs send to telegram."""
     if message not in errors:
         # Now each error should be sent only once.
         errors.append(message)
@@ -120,7 +121,7 @@ def check_tokens():
 
 def main():
     """Основная логика работы бота."""
-    loop = check_tokens() # Should i just put it in loop conditions?
+    loop = check_tokens()  # Should i just put it in loop conditions?
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     current_timestamp = int(time.time())
     while loop is True:
