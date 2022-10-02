@@ -35,12 +35,6 @@ cache = {}
 errors = {}
 
 
-class SendMessageError(Exception):
-    """Custom error for raise."""
-
-    pass
-
-
 def cache_errors(message):
     """
     Put errors in dict with counter.
@@ -63,7 +57,9 @@ def send_message(bot, message):
         logger.info(f'sent message:\n{message}')
     except telegram.error.TelegramError as error:
         logger.error(f'error when sending message:\n{error}')
-        raise SendMessageError('send message error')
+        # Why raising error if there is no except catching?
+    except Exception as error:
+        logger.error(f'something else go wrong in send_message: {error}')
 
 
 def get_api_answer(current_timestamp):
@@ -90,7 +86,7 @@ def check_response(response):
         raise TypeError('response is not dict')
     if 'homeworks' not in response:
         logger.error('homework not in response')
-        raise Exception('homework not in response')
+        raise KeyError('homework not in response')
     if not isinstance(response['homeworks'], list):
         logger.error('homework is not list')
         raise TypeError('homework is not list')
@@ -106,12 +102,13 @@ def parse_status(homework):
     for key in ('homework_name', 'status'):
         if key not in homework:
             raise KeyError('There is no correct keys in homework')
-    homework_name = homework.get('homework_name')
-    homework_status = homework.get('status')
+
+    homework_name = homework['homework_name']
+    homework_status = homework['status']
     if homework_status not in HOMEWORK_VERDICTS:
         raise Exception('status is different')
-    verdict = HOMEWORK_VERDICTS.get(homework_status)
 
+    verdict = HOMEWORK_VERDICTS.get(homework_status)
     if homework_name not in cache:
         logger.info('adding new homework to cache')
 
@@ -125,7 +122,7 @@ def parse_status(homework):
 def check_tokens():
     """Check that tokens exists. If not - stop programm."""
     if all((PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)):
-        print(PRACTICUM_TOKEN)
+
         return True
     logger.critical('TOKEN NOT FOUND. ALARM.')
 
@@ -148,12 +145,13 @@ def main():
                 send_message(bot, message)
         else:
             for homework in response:
-                message = parse_status(homework)
-                if message is not None:
-                    try:
+                try:
+                    message = parse_status(homework)
+                except Exception as error:
+                    logger.error(f'Error while parsing message:{error}')
+                else:
+                    if message:
                         send_message(bot, message)
-                    except Exception:
-                        logger.error('Error while sending error message')
         finally:
             time.sleep(RETRY_TIME)
 
