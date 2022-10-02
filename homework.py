@@ -13,6 +13,7 @@ TELEGRAM_TOKEN = os.getenv('TG_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('CHAT_ID')
 
 RETRY_TIME = 600
+ERROR_COUNT_LIMIT = 10
 ENDPOINT = 'https://practicum.yandex.ru/api/user_api/homework_statuses/'
 HEADERS = {'Authorization': f'OAuth {PRACTICUM_TOKEN}'}
 
@@ -31,15 +32,28 @@ logger.addHandler(handler)
 logger.setLevel(logging.INFO)
 
 cache = {}
-errors = []
+errors = {}
 
 
-def send_errors_but_not_spam(bot, message):
-    """Put errors in list. First time error occurs send to telegram."""
+class SendMessageError(Exception):
+    """Custom error for raise."""
+
+    pass
+
+
+def cache_errors(message):
+    """
+    Put errors in dict with counter.
+    Returns True if error occurs first time or error counter overfilled.
+    """
     if message not in errors:
-        # Now each error should be sent only once.
-        errors.append(message)
-        bot.send_message(TELEGRAM_CHAT_ID, message)
+        errors[message] = 1
+        logger.info('error was added to cache and sent to telegram')
+        return True
+
+    errors[message] += 1
+    if errors[message] >= ERROR_COUNT_LIMIT:
+        del errors[message]
 
 
 def send_message(bot, message):
@@ -49,7 +63,7 @@ def send_message(bot, message):
         logger.info(f'sent message:\n{message}')
     except telegram.error.TelegramError as error:
         logger.error(f'error when sending message:\n{error}')
-        raise Exception('send message error')
+        raise SendMessageError('send message error')
 
 
 def get_api_answer(current_timestamp):
@@ -65,6 +79,7 @@ def get_api_answer(current_timestamp):
         raise Exception(
             f'response status code not 200 but {response.status_code}'
         )
+
     return response.json()
 
 
@@ -103,28 +118,24 @@ def parse_status(homework):
     if cache.get(homework_name) != homework_status:
         cache[homework_name] = homework_status
         logger.info(f'new status for {homework_name} = {homework_status}')
-        return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
-    return
+        return f'Изменился статус проверки работы "{homework_name}". {verdict}'
 
 
 def check_tokens():
     """Check that tokens exists. If not - stop programm."""
-    if not all((PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)):
-        logger.critical('TOKEN NOT FOUND. ALARM.')
-        # Wanted to just raise error and stop programm there.
-        # But pytest think differently.
-        return False
-
-    return True
+    if all((PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)):
+        print(PRACTICUM_TOKEN)
+        return True
+    logger.critical('TOKEN NOT FOUND. ALARM.')
 
 
 def main():
     """Основная логика работы бота."""
-    loop = check_tokens()  # Should i just put it in loop conditions?
+    loop = check_tokens()
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     current_timestamp = int(time.time())
-    while loop is True:
+    while loop:
         try:
             logger.debug(f'new iteration on {current_timestamp}')
             response_from_api = get_api_answer(current_timestamp)
@@ -133,12 +144,16 @@ def main():
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             logger.error(f'error in main():\n{current_timestamp}\n{error}')
-            send_errors_but_not_spam(bot, message)
+            if cache_errors(message):
+                send_message(bot, message)
         else:
             for homework in response:
                 message = parse_status(homework)
                 if message is not None:
-                    send_message(bot, message)
+                    try:
+                        send_message(bot, message)
+                    except Exception:
+                        logger.error('Error while sending error message')
         finally:
             time.sleep(RETRY_TIME)
 
