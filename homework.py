@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 import time
 
 from dotenv import load_dotenv
@@ -35,6 +36,12 @@ cache = {}
 errors = {}
 
 
+class SendMessageError(Exception):
+    """Custom error for catching."""
+
+    pass
+
+
 def cache_errors(message):
     """
     Put errors in dict with counter.
@@ -57,9 +64,7 @@ def send_message(bot, message):
         logger.info(f'sent message:\n{message}')
     except telegram.error.TelegramError as error:
         logger.error(f'error when sending message:\n{error}')
-        # Why raising error if there is no except catching?
-    except Exception as error:
-        logger.error(f'something else go wrong in send_message: {error}')
+        raise SendMessageError('error while sending message')
 
 
 def get_api_answer(current_timestamp):
@@ -121,37 +126,36 @@ def parse_status(homework):
 
 def check_tokens():
     """Check that tokens exists. If not - stop programm."""
-    if all((PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)):
-
-        return True
-    logger.critical('TOKEN NOT FOUND. ALARM.')
+    return all((PRACTICUM_TOKEN, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID))
 
 
 def main():
     """Основная логика работы бота."""
-    loop = check_tokens()
+    if not check_tokens():
+        logger.critical('TOKEN NOT FOUND. ALARM.')
+        sys.exit()
     bot = telegram.Bot(token=TELEGRAM_TOKEN)
     current_timestamp = int(time.time())
-    while loop:
+    while True:
         try:
             logger.debug(f'new iteration on {current_timestamp}')
             response_from_api = get_api_answer(current_timestamp)
             current_timestamp = response_from_api.get('current_date')
             response = check_response(response_from_api)
+            for homework in response:
+                message = parse_status(homework)
+                if message:
+                    send_message(bot, message)
+        except SendMessageError as error:
+            logger.error(f'message was not sent. {error}')
         except Exception as error:
             message = f'Сбой в работе программы: {error}'
             logger.error(f'error in main():\n{current_timestamp}\n{error}')
             if cache_errors(message):
+                # How to catch this one?
+                # Adding new try/except results in
+                # main() too complex
                 send_message(bot, message)
-        else:
-            for homework in response:
-                try:
-                    message = parse_status(homework)
-                except Exception as error:
-                    logger.error(f'Error while parsing message:{error}')
-                else:
-                    if message:
-                        send_message(bot, message)
         finally:
             time.sleep(RETRY_TIME)
 
