@@ -1,9 +1,16 @@
-# homework_bot
-Python telegram bot to get homework status from yandex practicum.
-Should alert you if there is change in homework status.
+# Homework telegram bot
+### Телеграм бот для оповещения о проверенной домашней работе в Yandex.Practicum
 
-For this bot to work you need these parameters in your os environment or in .env file in project folder:
-
-YA_P_TOKEN - Your Yandex.Practicum token  
-TG_TOKEN - Your telegram bot token  
-CHAT_ID - ID of the chat where result should be sent.
+Чтобы бот запустился, нужно добавить следующие значения в .env файл:
+Your Yandex.Practicum token
+```sh
+YA_P_TOKEN
+```
+Your telegram bot token
+```sh
+TG_TOKEN
+```
+ID of the chat where result should be sent
+```sh
+CHAT_ID
+```
